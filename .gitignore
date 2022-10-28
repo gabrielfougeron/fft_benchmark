@@ -1,0 +1,7 @@
+*.png
+*.pyc
+*.npy
+*.vtk
+*.erfh5
+./output/*
+./data/*

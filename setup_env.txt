@@ -1,0 +1,7 @@
+conda create -n fft_bench -y
+conda activate fft_bench
+
+conda install -c intel -y  mkl_fft mkl
+conda install -c conda-forge -y scipy numpy pyfftw
+
+pip install perfplot
