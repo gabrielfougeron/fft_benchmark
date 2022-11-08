@@ -16,20 +16,42 @@ import mkl_fft
 import pyfftw
 
 pyfftw.config.NUM_THREADS = 1
-# pyfftw.config.PLANNER_EFFORT = 'FFTW_ESTIMATE'
-pyfftw.config.PLANNER_EFFORT = 'FFTW_MEASURE'
+pyfftw.config.PLANNER_EFFORT = 'FFTW_ESTIMATE'
+# pyfftw.config.PLANNER_EFFORT = 'FFTW_MEASURE'
 # pyfftw.config.PLANNER_EFFORT = 'FFTW_PATIENT'
 # pyfftw.config.PLANNER_EFFORT = 'FFTW_EXHAUSTIVE'
 
-import perfplot
 
 pyfftw.interfaces.cache.enable()
 pyfftw.interfaces.cache.set_keepalive_time(1000.)
 
 
+import perfplot
+import matplotlib.pyplot as plt
+
+
+def ranges(*args):
+    all_ranges = [range(arg) for arg in args]
+    return itertools.product(*all_ranges)
+
+def print_ranges(i_ranges,n_ranges):
+    n = len(i_ranges)
+    for i in range(n):
+        print(f'{i_ranges[i]+1}/{n_ranges[i]}  ',end='')
+    
+    print("")
+
+
+fig_folder = './out'
+
+ext_list = ['png']
+# ext_list = ['png','pdf']
+
+if not(os.path.isdir(fig_folder)):
+
+    os.makedirs(fig_folder)
 
 base_axis = 2
-
 
 all_base_shape = [
     np.array((1,2,1)),
@@ -39,18 +61,16 @@ all_base_shape = [
 
 n_shapes = len(all_base_shape)
 
-
-
 all_real_dtype = [
-    # np.float32,
+    np.float32,
     np.float64,
 ]
 all_complex_dtype = [
-    # np.complex64,
+    np.complex64,
     np.complex128,
 ]
 all_dtype_names = [
-    # "float32",
+    "float32",
     "float64",
 ]
 
@@ -78,26 +98,6 @@ def setup_irfft_vec(N,axis,shape,real_dtype,complex_dtype):
 # equality_check = functools.partial(np.allclose, rtol = 1e-3,atol = 1e-5 )
 equality_check = None
 
-
-# 
-# vec = setup_rfft_vec(10,2,np.array((1,1,1)),np.float64,np.complex128)
-# res = scipy.fft.rfft(vec,axis=2)
-# 
-# print(vec.shape)
-# print(vec.dtype)
-# print(res.shape)
-# print(res.dtype)
-# 
-# # 
-# vec = setup_irfft_vec(10,2,np.array((1,1,1)),np.float64,np.complex128)
-# res = scipy.fft.irfft(vec,axis=2)
-# 
-# print(vec.shape)
-# print(vec.dtype)
-# print(res.shape)
-# print(res.dtype)
-# 
-# exit()
 
 all_funs =  [
     [
@@ -140,57 +140,215 @@ n_funs = len(all_funs)
 
 
 # n_test = 1
-n_test = 3
+n_test = 10
 
-def ranges(*args):
-    all_ranges = [range(arg) for arg in args]
-    return itertools.product(*all_ranges)
+data_size = [600 * (2 ** k) for k in range(7)]     
+# data_size = [512 * (2 ** k) for k in range(5)]     
 
-def print_ranges(i_ranges,n_ranges):
-    n = len(i_ranges)
-    for i in range(n):
-        print(f'{i_ranges[i]+1}/{n_ranges[i]}  ',end='')
+n_data = len(data_size)
+max_backends = len(all_funs[0])
+
+save_filename = 'all_timings.npy'
+
+all_params_names = [
+    all_dtype_names,
+    all_funs_names,
+    [f'{item}_test' for item in range(n_test)],
+    [f'{item[0]}_loops' for item in all_base_shape],
+    backend_names,
+    [f'{item}_pts' for item in data_size],
+]
+
+all_timings_shape = (ntypes,n_funs,n_test,n_shapes,max_backends,n_data)
+
+if os.path.isfile(save_filename):
+
+    print("Benchmark file found. Loading ...")
+
+    all_timings = np.load('all_timings.npy')
+
+    assert (np.array(all_timings.shape) == np.array(all_timings_shape)).all()
+
+else:
+
+    print("Benchmark file not found. Performing benchmark ...")
+
+    all_timings = np.zeros(all_timings_shape)
+
+    for (i_type,i_funs,i_test,i_shape) in ranges(ntypes,n_funs,n_test,n_shapes):
+
+        print_ranges((i_type,i_funs,i_test,i_shape),(ntypes,n_funs,n_test,n_shapes))
+
+        real_dtype = all_real_dtype[i_type]
+        complex_dtype = all_complex_dtype[i_type]
+        funs = all_funs[i_funs]
+        base_shape = all_base_shape[i_shape]
+
+        setup = functools.partial(all_setups[i_funs], real_dtype = real_dtype, complex_dtype = complex_dtype , shape = base_shape, axis = base_axis )
+
+        b = perfplot.bench(
+            setup = setup,
+            kernels = funs,
+            labels = backend_names,
+            n_range = data_size,
+            equality_check = equality_check ,
+            target_time_per_measurement = 0.1,
+            max_time = 20.,
+        )
+
+        all_timings[i_type,i_funs,i_test,i_shape,0:len(funs),:] = b.timings_s.copy()
+# 
+#         filename = f"fft_benchmark_{all_dtype_names[i_type]}_{all_funs_names[i_funs]}_shape{i_shape+1}_test{i_test+1}_relative.png"
+# 
+#         b.save(
+#             filename ,
+#             transparent = False,
+#             relative_to = 2  ,
+#         )
+# 
+#         filename = f"fft_benchmark_{all_dtype_names[i_type]}_{all_funs_names[i_funs]}_shape{i_shape+1}_test{i_test+1}_absolute.png"
+# 
+#         b.save(
+#             filename ,
+#             transparent = False,
+#         )
+
+
+    np.save('all_timings.npy',all_timings)
+
+
+
+
     
-    print("")
+color_list = plt.rcParams['axes.prop_cycle'].by_key()['color']
+n_colors = len(color_list)
+
+linestyle_list = ['solid','dotted','dashed','dashdot']
+n_linestyles = len(linestyle_list)
 
 
 
-for (i_type,i_funs,i_test,i_shape) in ranges(ntypes,n_funs,n_test,n_shapes):
+ax_names = [
+    "FP_type"     , # 0,
+    "FFT_type"    , # 1
+    "Indep_test"  , # 2
+    "Array_shape" , # 3
+    "FFT_backend" , # 4
+    "Data_size"   , # 5   
+]
 
-    print_ranges((i_type,i_funs,i_test,i_shape),(ntypes,n_funs,n_test,n_shapes))
+n_avg = [2]
 
-    real_dtype = all_real_dtype[i_type]
-    complex_dtype = all_complex_dtype[i_type]
-    funs = all_funs[i_funs]
-    base_shape = all_base_shape[i_shape]
+n_points = 5
 
-    setup = functools.partial(all_setups[i_funs], real_dtype = real_dtype, complex_dtype = complex_dtype , shape = base_shape, axis = base_axis )
+n_lines = [4,3]
 
-    data_size=[600 * (2 ** k) for k in range(7)]    
+n_plot = []
+for i in range(len(all_timings_shape)) :
+    if not(i == n_points or i in n_lines or i in n_avg) :
+        n_plot.append(i)
 
-    b = perfplot.bench(
-        setup = setup,
-        kernels = funs,
-        labels = backend_names,
-        n_range = data_size,
-        equality_check = equality_check ,
-        target_time_per_measurement = 1.0,
-        max_time = 20.,
-    )
+plot_ranges = ranges(*[all_timings_shape[i] for i in n_plot])
 
-    filename = f"fft_benchmark_{all_dtype_names[i_type]}_{all_funs_names[i_funs]}_shape{i_shape+1}_test{i_test+1}_relative.png"
+it = np.zeros((len(ax_names)),dtype=int)
 
-    b.save(
-        filename ,
-        transparent = False,
-        relative_to = 2  ,
-    )
+for it_plot in plot_ranges:
 
-    filename = f"fft_benchmark_{all_dtype_names[i_type]}_{all_funs_names[i_funs]}_shape{i_shape+1}_test{i_test+1}_absolute.png"
+    plot_name = ''
+    for i in range(len(it_plot)):
+        it[n_plot[i]] = it_plot[i]
+        plot_name += ' ' +  all_params_names[n_plot[i]][it_plot[i]]
 
-    b.save(
-        filename ,
-        transparent = False,
-    )
+    fig = plt.figure(figsize=(10,6))
+    fig.clf()
+    ax = fig.add_subplot(1,1,1)
+    ax.set_yscale('log')
+    # ax.set_xscale('log')
 
+    points_labels = []
+    points_ranges = range(all_timings_shape[n_points])
+    for it_point in points_ranges:
+        points_labels.append(all_params_names[n_points][it_point])
+
+    i_line = -1
+    line_ranges = ranges(*[all_timings_shape[i] for i in n_lines])
+    for it_line in line_ranges:
+
+        i_line += 1
+
+        line_label = ''
+        for i in range(len(it_line)):
+            it[n_lines[i]] = it_line[i]
+            line_label += ' ' +  all_params_names[n_lines[i]][it_line[i]]
+        
+        x = []
+        y = []
+        top_spread_y = []
+        bot_spread_y = []
+
+        points_ranges = range(all_timings_shape[n_points])
+        for it_point in points_ranges:
+
+            it[n_points] = it_point
+
+            tot_avg = 0
+
+            avg_val = 0.
+            min_val = None
+            max_val = None
+
+            avg_ranges = ranges(*[all_timings_shape[i] for i in n_avg])
+            for it_avg in avg_ranges:
+
+                for i in range(len(it_avg)):
+                    it[n_avg[i]] = it_avg[i]
+
+                cur_val = all_timings[tuple(it)]
+
+                avg_val += cur_val
+                min_val = cur_val if min_val is None else min(cur_val,min_val)
+                max_val = cur_val if max_val is None else max(cur_val,max_val)
+                tot_avg += 1
+            
+            avg_val = avg_val / tot_avg
+
+            x.append(it_point)
+            y.append(avg_val)
+            top_spread_y.append(max_val)
+            bot_spread_y.append(min_val)
+
+        # color = color_list[i_line % n_colors]
+        color = color_list[it_line[0] % n_colors]
+
+        marker = None
+
+        # linestyle = linestyle_list[0]
+        # linestyle = linestyle_list[i_line % n_linestyles]
+        linestyle = linestyle_list[it_line[1] % n_linestyles]
+
+
+        plt.plot(x,y,label=line_label,color = color, marker=marker,linestyle=linestyle)
+        # plt.text(x[-1], y[-1], line_label,color = color_list[i_line % n_colors])
+
+        plt.fill_between(x, top_spread_y, bot_spread_y,color=color,alpha=0.2)
+
+
+
+    # print(points_labels)
+    ax.set_xticks(ticks=x,labels=points_labels)
+    plt.legend(bbox_to_anchor=(1.05, 1),
+                         loc='upper left', borderaxespad=0.)
+    # fig.tight_layout()
+
+
+    for ext in ext_list:
+
+        fig_filename = os.path.join(fig_folder,plot_name+'.'+ext)
+        plt.savefig(fig_filename, bbox_inches='tight')
+
+    plt.close('all')
+
+
+
+            
 
