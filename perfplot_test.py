@@ -27,6 +27,7 @@ pyfftw.interfaces.cache.set_keepalive_time(1000.)
 
 
 import perfplot
+import matplotlib
 import matplotlib.pyplot as plt
 
 
@@ -54,9 +55,9 @@ if not(os.path.isdir(fig_folder)):
 base_axis = 2
 
 all_base_shape = [
-    np.array((1,2,1)),
+    # np.array((1,2,1)),
     np.array((2,2,1)),
-    np.array((3,2,1)),
+    # np.array((3,2,1)),
 ]
 
 n_shapes = len(all_base_shape)
@@ -140,7 +141,11 @@ n_funs = len(all_funs)
 
 
 # n_test = 1
-n_test = 10
+n_test = 300
+
+time_per_test = 0.01
+
+
 
 data_size = [600 * (2 ** k) for k in range(7)]     
 # data_size = [512 * (2 ** k) for k in range(5)]     
@@ -173,9 +178,12 @@ else:
 
     print("Benchmark file not found. Performing benchmark ...")
 
+    print(f"Estimated total time: {time_per_test*ntypes*n_funs*n_test*n_shapes*max_backends*n_data} seconds")
+
     all_timings = np.zeros(all_timings_shape)
 
     for (i_type,i_funs,i_test,i_shape) in ranges(ntypes,n_funs,n_test,n_shapes):
+
 
         print_ranges((i_type,i_funs,i_test,i_shape),(ntypes,n_funs,n_test,n_shapes))
 
@@ -192,32 +200,13 @@ else:
             labels = backend_names,
             n_range = data_size,
             equality_check = equality_check ,
-            target_time_per_measurement = 0.1,
+            target_time_per_measurement = time_per_test,
             max_time = 20.,
         )
 
         all_timings[i_type,i_funs,i_test,i_shape,0:len(funs),:] = b.timings_s.copy()
-# 
-#         filename = f"fft_benchmark_{all_dtype_names[i_type]}_{all_funs_names[i_funs]}_shape{i_shape+1}_test{i_test+1}_relative.png"
-# 
-#         b.save(
-#             filename ,
-#             transparent = False,
-#             relative_to = 2  ,
-#         )
-# 
-#         filename = f"fft_benchmark_{all_dtype_names[i_type]}_{all_funs_names[i_funs]}_shape{i_shape+1}_test{i_test+1}_absolute.png"
-# 
-#         b.save(
-#             filename ,
-#             transparent = False,
-#         )
-
 
     np.save('all_timings.npy',all_timings)
-
-
-
 
     
 color_list = plt.rcParams['axes.prop_cycle'].by_key()['color']
@@ -226,7 +215,8 @@ n_colors = len(color_list)
 linestyle_list = ['solid','dotted','dashed','dashdot']
 n_linestyles = len(linestyle_list)
 
-
+plot_alpha = True
+# plot_alpha = False
 
 ax_names = [
     "FP_type"     , # 0,
@@ -237,11 +227,13 @@ ax_names = [
     "Data_size"   , # 5   
 ]
 
+relative_to = None
+# relative_to = np.array([2])
 n_avg = [2]
 
 n_points = 5
 
-n_lines = [4,3]
+n_lines = [4]
 
 n_plot = []
 for i in range(len(all_timings_shape)) :
@@ -259,16 +251,16 @@ for it_plot in plot_ranges:
         it[n_plot[i]] = it_plot[i]
         plot_name += ' ' +  all_params_names[n_plot[i]][it_plot[i]]
 
-    fig = plt.figure(figsize=(10,6))
+    fig = plt.figure(figsize=(14,10))
     fig.clf()
     ax = fig.add_subplot(1,1,1)
-    ax.set_yscale('log')
-    # ax.set_xscale('log')
 
     points_labels = []
     points_ranges = range(all_timings_shape[n_points])
     for it_point in points_ranges:
         points_labels.append(all_params_names[n_points][it_point])
+
+    leg_patch = []
 
     i_line = -1
     line_ranges = ranges(*[all_timings_shape[i] for i in n_lines])
@@ -302,8 +294,17 @@ for it_plot in plot_ranges:
 
                 for i in range(len(it_avg)):
                     it[n_avg[i]] = it_avg[i]
+                
+                if relative_to is None:
+                    rel_val = 1.
+                else:
+                    it_rel = it.copy()
+                    for i in range(len(it_line)):
+                        it_rel[n_lines[i]] = relative_to[i]
 
-                cur_val = all_timings[tuple(it)]
+                    rel_val = all_timings[tuple(it_rel)]
+
+                cur_val = all_timings[tuple(it)]/rel_val
 
                 avg_val += cur_val
                 min_val = cur_val if min_val is None else min(cur_val,min_val)
@@ -322,23 +323,77 @@ for it_plot in plot_ranges:
 
         marker = None
 
-        # linestyle = linestyle_list[0]
+        linestyle = linestyle_list[0]
         # linestyle = linestyle_list[i_line % n_linestyles]
-        linestyle = linestyle_list[it_line[1] % n_linestyles]
+        # linestyle = linestyle_list[it_line[1] % n_linestyles]
 
+        leg_patch.append(matplotlib.patches.Patch(color=color, label=line_label,linestyle=linestyle))
 
-        plt.plot(x,y,label=line_label,color = color, marker=marker,linestyle=linestyle)
+        # plt.plot(x,y,label=line_label,color = color, marker=marker,linestyle=linestyle)
         # plt.text(x[-1], y[-1], line_label,color = color_list[i_line % n_colors])
 
-        plt.fill_between(x, top_spread_y, bot_spread_y,color=color,alpha=0.2)
+        # plt.fill_between(x, top_spread_y, bot_spread_y,color=color,alpha=0.2)
+
+        if (plot_alpha):
+
+
+            x = []
+            sorted_vals = []
+
+            points_ranges = range(all_timings_shape[n_points])
+            for it_point in points_ranges:
+
+                it[n_points] = it_point
+                x.append(it_point)
+
+                it_slice = list(it.copy())
+                for i in n_avg:
+                    it_slice[i] = slice(None)
+
+                sorted_vals.append(np.sort(all_timings[tuple(it_slice)].reshape(-1)))
+
+                
+            sorted_vals = np.array(sorted_vals)
+
+            n_vals = sorted_vals.shape[1]
+            n_fills = n_vals // 2
+                
+            # color = color_list[i_line % n_colors]
+            color = color_list[it_line[0] % n_colors]
+
+            alpha = 0.7 / n_fills
+
+            for i_fill in range(n_fills):
+
+                i_bot = i_fill
+                i_top = n_vals - 1 - i_fill
+
+                plt.plot(x,sorted_vals[:,i_bot] ,label=line_label,color = color, marker=marker,linestyle=linestyle,alpha=alpha,lw=2.)
+                plt.plot(x, sorted_vals[:,i_top],label=line_label,color = color, marker=marker,linestyle=linestyle,alpha=alpha,lw=2.)
+                
+
+                # plt.fill_between(x, sorted_vals[:,i_bot], sorted_vals[:,i_top],facecolor=color,alpha=alpha)
+                
+
+
+
 
 
 
     # print(points_labels)
     ax.set_xticks(ticks=x,labels=points_labels)
-    plt.legend(bbox_to_anchor=(1.05, 1),
-                         loc='upper left', borderaxespad=0.)
+    
+    plt.legend(
+        handles=leg_patch,    
+        bbox_to_anchor=(1.05, 1),
+        loc='upper left',
+         borderaxespad=0.,
+         )
     # fig.tight_layout()
+    # ax.set_xscale('log')
+
+    ax.set_yscale('log')
+    # ax.set_ylim(bottom=0.)
 
 
     for ext in ext_list:
